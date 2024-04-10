@@ -14,6 +14,24 @@ import "strconv"
 // and reply for an RPC.
 //
 
+const (
+	TaskMap    = 0
+	TaskReduce = 1
+	TaskWait   = 2
+	TaskEnd    = 3
+)
+
+type TaskInfo struct {
+	State int
+
+	FileName  string
+	FileIndex int
+	PartIndex int
+
+	NReduce int
+	NFiles  int
+}
+
 type ExampleArgs struct {
 	X int
 }
@@ -23,7 +41,6 @@ type ExampleReply struct {
 }
 
 // Add your RPC definitions here.
-
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the master.

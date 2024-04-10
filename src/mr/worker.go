@@ -1,14 +1,17 @@
 package mr
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 import "log"
 import "net/rpc"
 import "hash/fnv"
 
-
 //
 // Map functions return a slice of KeyValue.
 //
+
 type KeyValue struct {
 	Key   string
 	Value string
@@ -24,17 +27,41 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-
 //
 // main/mrworker.go calls this function.
 //
-func Worker(mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string) {
 
-	// Your worker implementation here.
+func Worker(
+	mapFunc func(string, string) []KeyValue,
+	reduceFunc func(string, []string) string) {
 
-	// uncomment to send the Example RPC to the master.
-	// CallExample()
+	for {
+		taskInfo := CallAskTask()
+		switch taskInfo.State {
+		case TaskMap:
+			workerMap(mapFunc, taskInfo)
+			break
+		case TaskReduce:
+			workReduce(reduceFunc, taskInfo)
+			break
+		case TaskWait:
+			time.Sleep(time.Duration(time.Second * 5))
+			break
+		case TaskEnd:
+			fmt.Println("Master all tasks complete. Nothing to do...")
+
+		default:
+			panic("Invalid Task state received by worker")
+		}
+	}
+
+}
+
+func workReduce(reduceFunc func(string, []string) string, info *TaskInfo) {
+
+}
+
+func workerMap(mapFunc func(string, string) []KeyValue, info *TaskInfo) {
 
 }
 
@@ -43,6 +70,7 @@ func Worker(mapf func(string, string) []KeyValue,
 //
 // the RPC argument and reply types are defined in rpc.go.
 //
+
 func CallExample() {
 
 	// declare an argument structure.
@@ -82,4 +110,20 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 
 	fmt.Println(err)
 	return false
+}
+
+// worker 向 master 申请任务
+
+func CallAskTask() *TaskInfo {
+	args := ExampleArgs{}
+	reply := TaskInfo{}
+	call("Master.AskTask", &args, &reply)
+	return &reply
+}
+
+// worker 通知 master 任务完成
+
+func CallTaskDone(taskInfo *TaskInfo) {
+	reply := ExampleReply{}
+	call("Master.TaskDone", taskInfo, &reply)
 }
