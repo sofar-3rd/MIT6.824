@@ -14,6 +14,7 @@ import "strconv"
 // and reply for an RPC.
 //
 
+// 表示任务类型
 const (
 	TaskMap    = 0
 	TaskReduce = 1
@@ -22,14 +23,21 @@ const (
 )
 
 type TaskInfo struct {
-	State int
+	/*
+		Declared in const above
+			0  map
+			1  reduce
+			2  wait
+			3  end
+	*/
+	State int // 任务类型
 
-	FileName  string
-	FileIndex int
-	PartIndex int
+	FileName  string // 文件名
+	FileIndex int    // 文件序号 map 任务序号
+	PartIndex int    // reduce 任务序号
 
-	NReduce int
-	NFiles  int
+	NReduce int // reduce 任务个数
+	NFiles  int // 文件个数 map 任务个数
 }
 
 type ExampleArgs struct {
@@ -47,7 +55,8 @@ type ExampleReply struct {
 // Can't use the current directory since
 // Athena AFS doesn't support UNIX-domain sockets.
 func masterSock() string {
-	s := "/var/tmp/824-mr-"
+	// s := "/var/tmp/824-mr-"
+	s := "/home/lin/unixSock/824-mr-"
 	s += strconv.Itoa(os.Getuid())
 	return s
 }
