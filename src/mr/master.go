@@ -3,23 +3,13 @@ package mr
 import (
 	"fmt"
 	"log"
+	"sync"
 	"time"
 )
 import "net"
 import "os"
 import "net/rpc"
 import "net/http"
-import "sync"
-
-// TaskStatInterface
-
-type TaskStatInterface interface {
-	GenerateTaskInfo() TaskInfo
-	OutOfTime() bool
-	GetFileIndex() int
-	GetPartIndex() int
-	SetNow()
-}
 
 type TaskStat struct {
 	beginTime time.Time
@@ -30,6 +20,14 @@ type TaskStat struct {
 	nFiles    int
 }
 
+type TaskStatInterface interface {
+	GenerateTaskInfo() TaskInfo
+	OutOfTime() bool
+	GetFileIndex() int
+	GetPartIndex() int
+	SetNow()
+}
+
 type MapTaskStat struct {
 	TaskStat
 }
@@ -38,232 +36,264 @@ type ReduceTaskStat struct {
 	TaskStat
 }
 
-func (mapTS *MapTaskStat) GenerateTaskInfo() TaskInfo {
+func (this *MapTaskStat) GenerateTaskInfo() TaskInfo {
 	return TaskInfo{
 		State:     TaskMap,
-		FileName:  mapTS.fileName,
-		FileIndex: mapTS.fileIndex,
-		PartIndex: mapTS.partIndex,
-		NReduce:   mapTS.nReduce,
-		NFiles:    mapTS.nFiles,
+		FileName:  this.fileName,
+		FileIndex: this.fileIndex,
+		PartIndex: this.partIndex,
+		NReduce:   this.nReduce,
+		NFiles:    this.nFiles,
 	}
 }
 
-func (mapTS *ReduceTaskStat) GenerateTaskInfo() TaskInfo {
+func (this *ReduceTaskStat) GenerateTaskInfo() TaskInfo {
 	return TaskInfo{
 		State:     TaskReduce,
-		FileName:  mapTS.fileName,
-		FileIndex: mapTS.fileIndex,
-		PartIndex: mapTS.partIndex,
-		NReduce:   mapTS.nReduce,
-		NFiles:    mapTS.nFiles,
+		FileName:  this.fileName,
+		FileIndex: this.fileIndex,
+		PartIndex: this.partIndex,
+		NReduce:   this.nReduce,
+		NFiles:    this.nFiles,
 	}
 }
 
-func (TS *TaskStat) OutOfTime() bool {
-	duration := time.Now().Sub(TS.beginTime)
-	maxDuration := time.Duration(time.Second * 60)
-	return duration > maxDuration
+func (this *TaskStat) OutOfTime() bool {
+	return time.Now().Sub(this.beginTime) > time.Duration(time.Second*5)
 }
 
-func (TS *TaskStat) SetNow() {
-	TS.beginTime = time.Now()
+func (this *TaskStat) SetNow() {
+	this.beginTime = time.Now()
 }
 
-func (TS *TaskStat) GetFileIndex() int {
-	return TS.fileIndex
+func (this *TaskStat) GetFileIndex() int {
+	return this.fileIndex
 }
 
-func (TS *TaskStat) GetPartIndex() int { return TS.partIndex }
-
-// 任务队列
+func (this *TaskStat) GetPartIndex() int {
+	return this.partIndex
+}
 
 type TaskStatQueue struct {
 	taskArray []TaskStatInterface
 	mutex     sync.Mutex
 }
 
-func (queue *TaskStatQueue) lock() {
-	//fmt.Println("queue lock")
-	queue.mutex.Lock()
+func (this *TaskStatQueue) lock() {
+	this.mutex.Lock()
 }
 
-func (queue *TaskStatQueue) unlock() {
-	//fmt.Println("queue unlock")
-	queue.mutex.Unlock()
+func (this *TaskStatQueue) unlock() {
+	this.mutex.Unlock()
 }
 
-func (queue *TaskStatQueue) size() int {
-	return len(queue.taskArray)
+func (this *TaskStatQueue) Size() int {
+	return len(this.taskArray)
 }
 
-func (queue *TaskStatQueue) pop() TaskStatInterface {
-	queue.lock()
-	if queue.size() == 0 {
-		queue.unlock()
+func (this *TaskStatQueue) Pop() TaskStatInterface {
+	this.lock()
+	arrayLength := len(this.taskArray)
+	if arrayLength == 0 {
+		this.unlock()
 		return nil
 	}
-
-	res := queue.taskArray[queue.size()-1]
-	queue.taskArray = queue.taskArray[:queue.size()-1]
-	queue.unlock()
-	return res
+	ret := this.taskArray[arrayLength-1]
+	this.taskArray = this.taskArray[:arrayLength-1]
+	this.unlock()
+	return ret
 }
 
-func (queue *TaskStatQueue) push(task TaskStatInterface) {
-	queue.lock()
-	if task == nil {
-		queue.unlock()
+func (this *TaskStatQueue) Push(taskStat TaskStatInterface) {
+	this.lock()
+	if taskStat == nil {
+		this.unlock()
 		return
 	}
-	queue.taskArray = append(queue.taskArray, task)
-	queue.unlock()
+	this.taskArray = append(this.taskArray, taskStat)
+	this.unlock()
 }
 
-func (queue *TaskStatQueue) TimeOutQueue() []TaskStatInterface {
+func (this *TaskStatQueue) TimeOutQueue() []TaskStatInterface {
 	outArray := make([]TaskStatInterface, 0)
-	queue.lock()
-	for taskIndex := 0; taskIndex < queue.size(); {
-		taskStat := queue.taskArray[taskIndex]
-		if taskStat.OutOfTime() {
+	this.lock()
+	for taskIndex := 0; taskIndex < len(this.taskArray); {
+		taskStat := this.taskArray[taskIndex]
+		if (taskStat).OutOfTime() {
 			outArray = append(outArray, taskStat)
-			queue.taskArray = append(queue.taskArray[:taskIndex], queue.taskArray[taskIndex+1:]...)
+			this.taskArray = append(this.taskArray[:taskIndex], this.taskArray[taskIndex+1:]...)
+			// must resume at this index next time
 		} else {
 			taskIndex++
 		}
 	}
-	queue.unlock()
+	this.unlock()
 	return outArray
 }
 
-func (queue *TaskStatQueue) MoveAppend(rhs []TaskStatInterface) {
-	queue.lock()
-	queue.taskArray = append(queue.taskArray, rhs...)
+func (this *TaskStatQueue) MoveAppend(rhs []TaskStatInterface) {
+	this.lock()
+	this.taskArray = append(this.taskArray, rhs...)
 	rhs = make([]TaskStatInterface, 0)
-	queue.unlock()
+	this.unlock()
 }
 
-func (queue *TaskStatQueue) RemoveTask(fileIndex int, partIndex int) {
-	queue.lock()
-	for index := 0; index < queue.size(); {
-		task := queue.taskArray[index]
+func (this *TaskStatQueue) RemoveTask(fileIndex int, partIndex int) {
+	this.lock()
+	for index := 0; index < len(this.taskArray); {
+		task := this.taskArray[index]
 		if fileIndex == task.GetFileIndex() && partIndex == task.GetPartIndex() {
-			queue.taskArray = append(queue.taskArray[:index], queue.taskArray[index+1:]...)
+			this.taskArray = append(this.taskArray[:index], this.taskArray[index+1:]...)
 		} else {
 			index++
 		}
 	}
-	queue.unlock()
+	this.unlock()
+}
+
+type Master struct {
+	// Your definitions here.
+
+	filenames []string
+
+	// reduce task queue
+	reduceTaskWaiting TaskStatQueue
+	reduceTaskRunning TaskStatQueue
+
+	// map task statistics
+	mapTaskWaiting TaskStatQueue
+	mapTaskRunning TaskStatQueue
+
+	// machine state
+	isDone  bool
+	nReduce int
 }
 
 // Your code here -- RPC handlers for the worker to call.
+/*
+func (this *Master) TryMap(args *TryMapArgs, reply *TryMapReply) error {
+	if this.isMapped {
+		reply.RunMap = false
+		return nil
+	}
+	for this.isMapping {
+		time.Sleep(time.Duration(1) * time.Second)
+	}
+	this.isMapped = false
+	this.isMapping = true
+	reply.RunMap = true
+	return nil
+}
+
+func (this *Master) MapFinished(args *TryMapArgs, reply *ExampleReply) error {
+	this.isMapping = false
+	this.isMapped = true
+	return nil
+}
+*/
+func (this *Master) AskTask(args *ExampleArgs, reply *TaskInfo) error {
+	if this.isDone {
+		reply.State = TaskEnd
+		return nil
+	}
+
+	// check for reduce tasks
+	reduceTask := this.reduceTaskWaiting.Pop()
+	if reduceTask != nil {
+		// an available reduce task
+		// record task begin time
+		reduceTask.SetNow()
+		// note task is running
+		this.reduceTaskRunning.Push(reduceTask)
+		// setup a reply
+		*reply = reduceTask.GenerateTaskInfo()
+		fmt.Printf("Distributing reduce task on part %v %vth file %v\n", reply.PartIndex, reply.FileIndex, reply.FileName)
+		return nil
+	}
+
+	// check for map tasks
+	mapTask := this.mapTaskWaiting.Pop()
+	if mapTask != nil {
+		// an available map task
+		// record task begin time
+		mapTask.SetNow()
+		// note task is running
+		this.mapTaskRunning.Push(mapTask)
+		// setup a reply
+		*reply = mapTask.GenerateTaskInfo()
+		fmt.Printf("Distributing map task on %vth file %v\n", reply.FileIndex, reply.FileName)
+		return nil
+	}
+
+	// all tasks distributed
+	if this.mapTaskRunning.Size() > 0 || this.reduceTaskRunning.Size() > 0 {
+		// must wait for new tasks
+		reply.State = TaskWait
+		return nil
+	}
+	// all tasks complete
+	reply.State = TaskEnd
+	this.isDone = true
+	return nil
+}
+
+func (this *Master) distributeReduce() {
+	reduceTask := ReduceTaskStat{
+		TaskStat{
+			fileIndex: 0,
+			partIndex: 0,
+			nReduce:   this.nReduce,
+			nFiles:    len(this.filenames),
+		},
+	}
+	for reduceIndex := 0; reduceIndex < this.nReduce; reduceIndex++ {
+		task := reduceTask
+		task.partIndex = reduceIndex
+		this.reduceTaskWaiting.Push(&task)
+	}
+}
+
+func (this *Master) TaskDone(args *TaskInfo, reply *ExampleReply) error {
+	switch args.State {
+	case TaskMap:
+		fmt.Printf("Map task on %vth file %v complete\n", args.FileIndex, args.FileName)
+		this.mapTaskRunning.RemoveTask(args.FileIndex, args.PartIndex)
+		if this.mapTaskRunning.Size() == 0 && this.mapTaskWaiting.Size() == 0 {
+			// all map tasks done
+			// can distribute reduce tasks
+			this.distributeReduce()
+		}
+		break
+	case TaskReduce:
+		fmt.Printf("Reduce task on %vth part complete\n", args.PartIndex)
+		this.reduceTaskRunning.RemoveTask(args.FileIndex, args.PartIndex)
+		break
+	default:
+		panic("Task Done error")
+	}
+	return nil
+}
 
 //
 // an example RPC handler.
 //
 // the RPC argument and reply types are defined in rpc.go.
 //
-
-type Master struct {
-	// Your definitions here.
-	filenames []string
-
-	mapTaskWaiting TaskStatQueue
-	mapTaskRunning TaskStatQueue
-
-	reduceTaskWaiting TaskStatQueue
-	reduceTaskRunning TaskStatQueue
-
-	isDone  bool
-	nReduce int
-}
-
 func (m *Master) Example(args *ExampleArgs, reply *ExampleReply) error {
 	reply.Y = args.X + 1
-	return nil
-}
-
-func (m *Master) TaskDone(args *TaskInfo, reply *ExampleReply) error {
-	switch args.State {
-	case TaskMap:
-		m.mapTaskRunning.RemoveTask(args.FileIndex, args.PartIndex)
-		fmt.Printf("Map task on %vth file %v complete! Remaining running tasks:[%v]\n", args.FileIndex, args.FileName, m.mapTaskRunning.size())
-		// 所有 map 任务完成，开始分配 reduce 任务
-		if m.mapTaskWaiting.size() == 0 && m.mapTaskRunning.size() == 0 {
-			m.distributeReduceTask()
-		}
-		break
-	case TaskReduce:
-		fmt.Printf("Reduce task on %vth part complete! Remaining running tasks:[%v]\n", args.PartIndex, m.reduceTaskRunning.size())
-		m.reduceTaskRunning.RemoveTask(args.FileIndex, args.PartIndex)
-		break
-	default:
-		panic("Unknown state")
-	}
-	return nil
-}
-
-func (m *Master) AskTask(args *ExampleArgs, reply *TaskInfo) error {
-	// 查看任务是否完成
-	if m.isDone {
-		reply.State = TaskEnd
-		return nil
-	}
-
-	// 是否有可用的reduce任务
-	reduceTask := m.reduceTaskWaiting.pop()
-	if reduceTask != nil {
-		fmt.Printf("Distributing reduce task...\n")
-		// 记录任务开始时间
-		reduceTask.SetNow()
-		m.reduceTaskRunning.push(reduceTask)
-		*reply = reduceTask.GenerateTaskInfo()
-		fmt.Printf("Distributing reduce task on part %vth file %v, Remaining waiting tasks:[%v]\n", reply.PartIndex, reply.FileName, m.reduceTaskWaiting.size())
-		return nil
-	}
-
-	// 是否有可用的map任务
-	mapTask := m.mapTaskWaiting.pop()
-	if mapTask != nil {
-		fmt.Printf("Distributing map task...\n")
-		// 记录任务开始时间
-		mapTask.SetNow()
-		m.mapTaskRunning.push(mapTask)
-		*reply = mapTask.GenerateTaskInfo()
-		fmt.Printf("Distributing map task on %vth file %v, Remaining waiting tasks:[%v]\n", reply.FileIndex, reply.FileName, m.mapTaskWaiting.size())
-		return nil
-	}
-
-	// should exit
-	// 所有任务已分配
-	if m.mapTaskRunning.size() > 0 || m.reduceTaskRunning.size() > 0 {
-		fmt.Println("All tasks had been distributed")
-		fmt.Printf("running map Task:[%v] running reduce Task:[%v]\n", m.mapTaskRunning.size(), m.reduceTaskRunning.size())
-		reply.State = TaskWait
-		return nil
-	}
-
-	// 所有任务已完成
-	reply.State = TaskEnd
-	m.isDone = true
 	return nil
 }
 
 //
 // start a thread that listens for RPCs from worker.go
 //
-
 func (m *Master) server() {
 	rpc.Register(m)
 	rpc.HandleHTTP()
 	//l, e := net.Listen("tcp", ":1234")
 	sockname := masterSock()
-	// fmt.Println(sockname)
 	os.Remove(sockname)
-	// For Unix networks, the address must be a file system path.
-
 	l, e := net.Listen("unix", sockname)
-	println("start listening")
 	if e != nil {
 		log.Fatal("listen error:", e)
 	}
@@ -274,51 +304,10 @@ func (m *Master) server() {
 // main/mrmaster.go calls Done() periodically to find out
 // if the entire job has finished.
 //
+func (this *Master) Done() bool {
+	// Your code here.
 
-func (m *Master) Done() bool {
-	//if m.isDone {
-	//	log.Println("asked whether i am done, replying yes...")
-	//} else {
-	//	log.Println("asked whether i am done, replying no...")
-	//}
-	return m.isDone
-}
-
-// 分发 Reduce 任务
-func (m *Master) distributeReduceTask() {
-	reduceTask := ReduceTaskStat{
-		TaskStat{
-			fileIndex: 0,
-			partIndex: 0,
-			nReduce:   m.nReduce,
-			nFiles:    len(m.filenames),
-		},
-	}
-
-	for reduceIndex := 0; reduceIndex < m.nReduce; reduceIndex++ {
-		task := reduceTask
-		task.partIndex = reduceIndex
-		m.reduceTaskWaiting.push(&task)
-	}
-}
-
-func (m *Master) collectOutOfTime() {
-	for m.isDone == false {
-		fmt.Println("collect OutOfTime Task...")
-		time.Sleep(time.Duration(time.Second * 5))
-		if m.reduceTaskRunning.size() > 0 {
-			timeoutTasks := m.reduceTaskRunning.TimeOutQueue()
-			if len(timeoutTasks) > 0 {
-				m.reduceTaskWaiting.MoveAppend(timeoutTasks)
-			}
-		}
-		if m.mapTaskRunning.size() > 0 {
-			timeoutTasks := m.mapTaskRunning.TimeOutQueue()
-			if len(timeoutTasks) > 0 {
-				m.mapTaskWaiting.MoveAppend(timeoutTasks)
-			}
-		}
-	}
+	return this.isDone
 }
 
 //
@@ -326,9 +315,7 @@ func (m *Master) collectOutOfTime() {
 // main/mrmaster.go calls this function.
 // nReduce is the number of reduce tasks to use.
 //
-
 func MakeMaster(files []string, nReduce int) *Master {
-
 	// distribute map tasks
 	mapArray := make([]TaskStatInterface, 0)
 	for fileIndex, filename := range files {
@@ -345,19 +332,36 @@ func MakeMaster(files []string, nReduce int) *Master {
 	}
 	m := Master{
 		mapTaskWaiting: TaskStatQueue{taskArray: mapArray},
-		isDone:         false,
+		nReduce:        nReduce,
 		filenames:      files,
-		nReduce:        nReduce}
+	}
 
+	// create tmp directory if not exists
 	if _, err := os.Stat("mr-tmp"); os.IsNotExist(err) {
 		err = os.Mkdir("mr-tmp", os.ModePerm)
 		if err != nil {
-			log.Fatalf("Create temp directory failed... Error: %v\n", err)
+			fmt.Print("Create tmp directory failed... Error: %v\n", err)
+			panic("Create tmp directory failed...")
 		}
 	}
 
+	// begin a thread to collect tasks out of time
 	go m.collectOutOfTime()
 
 	m.server()
 	return &m
+}
+
+func (this *Master) collectOutOfTime() {
+	for {
+		time.Sleep(time.Duration(time.Second * 5))
+		timeouts := this.reduceTaskRunning.TimeOutQueue()
+		if len(timeouts) > 0 {
+			this.reduceTaskWaiting.MoveAppend(timeouts)
+		}
+		timeouts = this.mapTaskRunning.TimeOutQueue()
+		if len(timeouts) > 0 {
+			this.mapTaskWaiting.MoveAppend(timeouts)
+		}
+	}
 }
