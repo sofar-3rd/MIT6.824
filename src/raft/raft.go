@@ -19,14 +19,12 @@ package raft
 
 import "sync"
 import "sync/atomic"
-import "../labrpc"
+import "labs-2020/src/labrpc"
 
 // import "bytes"
 // import "../labgob"
 
-
-
-//
+// ApplyMsg
 // as each Raft peer becomes aware that successive log entries are
 // committed, the peer should send an ApplyMsg to the service (or
 // tester) on the same server, via the applyCh passed to Make(). set
@@ -43,7 +41,7 @@ type ApplyMsg struct {
 	CommandIndex int
 }
 
-//
+// Raft
 // A Go object implementing a single Raft peer.
 //
 type Raft struct {
@@ -57,8 +55,31 @@ type Raft struct {
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
+	// 2A
+	// Persistent state for all servers
+	currentTerm int
+	votedFor    int
+	logEntries  []logEntry
+
+	// Volatile state on all servers
+	commitIndex int
+	lastApplied int
+
+	// Volatile state on leaders
+	// 当节点为 leader 时, 维护其他节点日志同步情况
+	isLeader   bool
+	nextIndex  []int
+	matchIndex []int
 }
 
+// logEntries
+type logEntry struct {
+	Log   []byte
+	term  int
+	index int
+}
+
+// GetState
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
@@ -66,6 +87,7 @@ func (rf *Raft) GetState() (int, bool) {
 	var term int
 	var isleader bool
 	// Your code here (2A).
+
 	return term, isleader
 }
 
@@ -84,7 +106,6 @@ func (rf *Raft) persist() {
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
 }
-
 
 //
 // restore previously persisted state.
@@ -108,30 +129,66 @@ func (rf *Raft) readPersist(data []byte) {
 	// }
 }
 
-
-
-
 //
+// RequestVoteArgs
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
 //
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
+
+	// 2A
+	term         int
+	candidateID  int
+	lastLogIndex int
+	lastLogTerm  int
 }
 
 //
+// RequestVoteReply
 // example RequestVote RPC reply structure.
 // field names must start with capital letters!
 //
 type RequestVoteReply struct {
 	// Your data here (2A).
+	term        int
+	voteGranted bool
 }
 
 //
+// RequestVote
 // example RequestVote RPC handler.
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+
+	// 2A
+	reply.term = rf.currentTerm
+
+	// Reply false if term < currentTerm
+	if args.term < rf.currentTerm || rf.votedFor > 0 {
+		reply.voteGranted = false
+	}
+	logLen := len(rf.logEntries)
+	localLastTerm := rf.logEntries[logLen-1].term
+	localLastIndex := rf.logEntries[logLen-1].index
+
+	// If votedFor is null or candidateId, and candidate’s log is at
+	// least as up-to-date as receiver’s log, grant vote
+
+	if localLastTerm > args.lastLogTerm {
+		reply.voteGranted = false
+	} else if localLastTerm < args.lastLogTerm {
+		reply.voteGranted = true
+		rf.votedFor = args.candidateID
+	} else {
+		if localLastIndex <= args.lastLogIndex {
+			reply.voteGranted = true
+			rf.votedFor = args.candidateID
+		} else {
+			reply.voteGranted = false
+		}
+	}
 }
 
 //
@@ -168,8 +225,8 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return ok
 }
 
-
 //
+// Start
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
 // server isn't the leader, returns false. otherwise start the
@@ -190,11 +247,11 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	// Your code here (2B).
 
-
 	return index, term, isLeader
 }
 
 //
+// Kill
 // the tester doesn't halt goroutines created by Raft after each test,
 // but it does call the Kill() method. your code can use killed() to
 // check whether Kill() has been called. the use of atomic avoids the
@@ -216,6 +273,7 @@ func (rf *Raft) killed() bool {
 }
 
 //
+// Make
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
 // server's port is peers[me]. all the servers' peers[] arrays
@@ -235,9 +293,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// Your initialization code here (2A, 2B, 2C).
 
+	// 2A
+
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
-
 
 	return rf
 }

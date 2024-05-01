@@ -49,7 +49,7 @@ package labrpc
 //   pass svc to srv.AddService()
 //
 
-import "../labgob"
+import "labs-2020/src/labgob"
 import "bytes"
 import "reflect"
 import "sync"
@@ -78,6 +78,7 @@ type ClientEnd struct {
 	done    chan struct{} // closed when Network is cleaned up
 }
 
+// Call
 // send an RPC, wait for the reply.
 // the return value indicates success; false means that
 // no reply was received from the server.
@@ -306,6 +307,8 @@ func (rn *Network) processReq(req reqMsg) {
 
 }
 
+//
+// MakeEnd
 // create a client end-point.
 // start the thread that listens and delivers.
 func (rn *Network) MakeEnd(endname interface{}) *ClientEnd {
