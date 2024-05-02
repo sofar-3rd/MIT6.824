@@ -385,6 +385,7 @@ func (rn *Network) GetTotalBytes() int64 {
 // the same rpc dispatcher. so that e.g. both a Raft
 // and a k/v server can listen to the same rpc endpoint.
 //
+
 type Server struct {
 	mu       sync.Mutex
 	services map[string]*Service

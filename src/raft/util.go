@@ -7,7 +7,8 @@ import (
 )
 
 // Debugging
-const Debug = 1
+
+const Debug = 0
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -16,15 +17,35 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-// heartBeatTimeout 100 ms
+// heartBeatTimeout 200 ms
 // electionTimeout 300ms - 500ms
+
+const (
+	heartBeatTimeout     int = 200
+	minElectionTimeout   int = 600
+	rangeElectionTimeout int = 400
+)
 
 func RandomizedElectionTimeout() time.Duration {
 	rand.Seed(time.Now().UnixNano())
-	num := rand.Intn(4)*100 + 300
+	num := rand.Intn(rangeElectionTimeout) + minElectionTimeout
 	return time.Duration(num) * time.Millisecond
 }
 
 func HeartbeatTimeout() time.Duration {
-	return time.Duration(100) * time.Millisecond
+	return time.Duration(heartBeatTimeout) * time.Millisecond
+}
+
+func Min(x, y int) int {
+	if x < y {
+		return x
+	}
+	return y
+}
+
+func Max(x, y int) int {
+	if x < y {
+		return y
+	}
+	return x
 }
