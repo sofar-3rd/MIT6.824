@@ -112,7 +112,7 @@ func (rf *Raft) ticker() {
 		select {
 		case <-rf.electionTimer.C:
 			rf.mu.Lock()
-			if rf.state == follower {
+			if rf.state != leader {
 				DPrintf("{Node %v} election timeout, start election", rf.me)
 				rf.changeState(candidate)
 				rf.currentTerm += 1
@@ -551,26 +551,18 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	// 日志匹配成功
 
-	// 更新 CommitIndex
-	if args.LeaderCommit > rf.commitIndex {
-		defer rf.advanceCommitIndexForFollower(args.LeaderCommit)
-	}
-
 	// 如果 entries 为空，则为心跳包，直接返回即可
-	if len(args.Entries) == 0 {
-		reply.Term, reply.Success = rf.currentTerm, true
-		return
+	if len(args.Entries) != 0 { // 更新日志
+		appendPos := args.Entries[0].Index - firstIndex
+		if appendPos < len(rf.logEntries) {
+			rf.logEntries = rf.logEntries[0:appendPos]
+			rf.logEntries = append(rf.logEntries, args.Entries...)
+		} else {
+			rf.logEntries = append(rf.logEntries, args.Entries...)
+		}
 	}
-
-	// 更新日志
-	appendPos := args.Entries[0].Index - firstIndex
-	if appendPos < len(rf.logEntries) {
-		rf.logEntries = rf.logEntries[0:appendPos]
-		rf.logEntries = append(rf.logEntries, args.Entries...)
-	} else {
-		rf.logEntries = append(rf.logEntries, args.Entries...)
-	}
-
+	// 更新 CommitIndex
+	rf.advanceCommitIndexForFollower(args.LeaderCommit)
 	reply.Term, reply.Success = rf.currentTerm, true
 }
 
