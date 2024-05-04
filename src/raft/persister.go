@@ -13,6 +13,7 @@ import "sync"
 
 type Persister struct {
 	mu        sync.Mutex
+	logs      []byte
 	raftstate []byte
 	snapshot  []byte
 }
@@ -40,6 +41,12 @@ func (ps *Persister) ReadRaftState() []byte {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	return ps.raftstate
+}
+
+func (ps *Persister) ReadRaftLogs() []byte {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	return ps.logs
 }
 
 func (ps *Persister) RaftStateSize() int {

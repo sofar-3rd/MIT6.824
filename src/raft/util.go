@@ -23,12 +23,12 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 const (
 	heartBeatTimeout     int = 200
 	minElectionTimeout   int = 600
-	rangeElectionTimeout int = 400
+	rangeElectionTimeout int = 2
 )
 
 func RandomizedElectionTimeout() time.Duration {
 	rand.Seed(time.Now().UnixNano())
-	num := rand.Intn(rangeElectionTimeout) + minElectionTimeout
+	num := rand.Intn(rangeElectionTimeout+1)*heartBeatTimeout + minElectionTimeout
 	return time.Duration(num) * time.Millisecond
 }
 
